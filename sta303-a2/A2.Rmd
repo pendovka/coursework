@@ -1,0 +1,124 @@
+---
+title: "Impact of Zinc Treatment on Immune Response in HIV-positive Children"
+author: "Alexey Arkhangelskiy"
+date: "12/08/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include = FALSE}
+library(dplyr)
+library(lmerTest)
+library(ggplot2)
+cd4 <- read.table("/Users/pendovka/Downloads/CD4.txt")
+```
+
+# Question 1
+
+## a)
+
+Let's plot a histogram of the CD4 percentages.
+
+```{r, echo = FALSE}
+cd4 %>% ggplot(aes(x=CD4PCT))+
+  geom_histogram(bins = 30)+
+  labs(x = "CD4 %")+
+  theme_bw()
+```
+
+The issue here is that if we want to use a normal model, having that left-truncated data near the y-axis will inevitably cause issues down the line. A good transformation is the square root transformation, which leaves the distribution reasonable symmetric.
+
+```{r, echo = FALSE}
+cd4 %>% ggplot(aes(x=sqrt(CD4PCT)))+
+  geom_histogram(bins = 30)+
+  labs(x = "square rooted CD4 %")+
+  theme_bw()
+```
+
+## b)
+
+Let's plot the CD4 percentages over time.
+
+```{r, echo = FALSE}
+
+cd4 %>% 
+  filter(newpid<11) %>% 
+  ggplot(aes(x=time, y = sqrt(CD4PCT), col = factor(newpid)))+
+  geom_point()+
+  geom_line()+
+  labs(ylab = "CD4 %", xlab = "Time Since Diagnosis", col = "ID")+
+  theme_bw()
+```
+
+## Part c)
+
+```{r}
+simple_model <- lmer(data=cd4, sqrt(CD4PCT) ~ time + (1|newpid))
+summary(simple_model)$varcor
+summary(simple_model)$coefficients
+```
+
+## Part d)
+
+```{r}
+complex_model <- lmer(data=cd4, sqrt(CD4PCT) ~ time + baseage + treatmnt + (1|newpid))
+summary(complex_model)$varcor
+summary(complex_model)$coefficients
+```
+
+The interesting thing about these predictors is that they describe the GROUP of observations. In other words, they are constant for each child. In the Radon example, we had a predictor (basement) that described each house. But imagine if we had variables that described each county.
+
+These are called group level predictors, and they should effect our group-level variance, but not our individual level variance. In our case, the effect is very small (sd went from 1.399 to 1.375), but definitely noticeable. Note that our individual (residual) level variance barely changed at all.
+
+## Part e)
+
+On average, patients who received the treatment had a CD4 percentage that was 0.18 higher on the square root scale than those who did not receive the treatment. This result was not statistically significant when using a t-test with corrected degrees of freedom. We don't have enough evidence to conclude that the treatment is effective.
+
+## Part f) 
+
+Need information on this child:
+
+```{r}
+newpid9 <- cd4 %>% filter(newpid==9) %>% select(baseage, treatmnt) %>% colMeans
+```
+
+```{r}
+alpha9 <- coef(complex_model)$newpid[9,1]
+betas <- fixef(complex_model)
+sigma_eps <- summary(complex_model)$sigma
+
+n.sims <- 1000
+set.seed(12314112)
+
+newpid9_new <- rnorm(n.sims, alpha9 + betas[2]*1.4 + betas[3]*newpid9[1], sigma_eps)
+
+pi <- quantile(newpid9_new, probs=c(0.025, 0.975))
+```
+
+The 95% prediction interval is (`r round(pi[1]^2,2)` % to `r round(pi[2]^2,2)` %), with a point estimate of `r round(median(newpid9_new)^2, 2)` %
+
+
+## Part g)
+
+```{r}
+baseages <- cd4 %>% group_by(newpid) %>% summarise(age = mean(baseage))
+
+sigma_alpha <- summary(complex_model)$varcor$newpid[1] %>% sqrt()
+mu_alpha <- betas[1]
+
+alpha_new <- rnorm(n.sims, mu_alpha, sigma_alpha)
+
+new_newpid <- rnorm(n.sims, alpha_new + betas[2]*1 + betas[3]*mean(baseages$age), sigma_eps)
+
+pi2 <- quantile(new_newpid, probs = c(0.025, 0.5, 0.975))^2
+```
+
+The prediction interval for the new child is (`r round(pi2[1],2)`% to `r round(pi2[3],2)`%), with a point estimate of `r round(pi2[2],2)`%.
+
+Had we used the model from c), our interval would be wider because we are more uncertain about the child's intercept. I.e there would be more variation in $\alpha_\text{new}$.
+
+
+
